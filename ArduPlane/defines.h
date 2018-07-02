@@ -44,7 +44,7 @@ enum gcs_failsafe {
 #define T6 1000000
 #define T7 10000000
 
-enum FlightMode {
+enum FlightMode {   //·ÉÐÐÄ£Ê½
     MANUAL        = 0,
     CIRCLE        = 1,
     STABILIZE     = 2,

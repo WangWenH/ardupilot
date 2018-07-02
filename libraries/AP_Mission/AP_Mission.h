@@ -263,6 +263,8 @@ public:
     FUNCTOR_TYPEDEF(mission_complete_fn_t, void);
 
     // mission state enumeration
+    //任务状态的枚举
+    //任务可能中断,可以在执行任务当中我遥控飞机飞到其他地方去，当遥控放手之后又继续执行任务
     enum mission_state {
         MISSION_STOPPED=0,
         MISSION_RUNNING=1,

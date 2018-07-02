@@ -168,7 +168,7 @@ void Plane::rudder_arm_disarm_check()
 		}
 	}
 }
-
+//用来读取各个通道的PWM值,并进行角度或范围的转换
 void Plane::read_radio()
 {
     if (!hal.rcin->new_input()) {

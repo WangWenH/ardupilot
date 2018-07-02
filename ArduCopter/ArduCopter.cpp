@@ -246,7 +246,7 @@ void Copter::loop()
 // Main loop - 400hz
 void Copter::fast_loop()
 {
-    // update INS immediately to get current gyro data populated
+    // update INS immediately to get current gyro data populated(raw data?)
     ins.update();
     
     // run low level rate controllers that only require IMU data

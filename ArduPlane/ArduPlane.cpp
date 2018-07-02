@@ -21,10 +21,11 @@
  */
 
 #include "Plane.h"
+#include <uORB/topics/actuator_controls.h>
 
 #define SCHED_TASK(func, rate_hz, max_time_micros) SCHED_TASK_CLASS(Plane, &plane, func, rate_hz, max_time_micros)
 
-
+struct actuator_controls_s          _actuators;    /**< actuator control inputs */
 /*
   scheduler table - all regular tasks are listed here, along with how
   often they should be called (in Hz) and the maximum time
@@ -521,6 +522,7 @@ void Plane::update_GPS_10Hz(void)
 
 /*
   main handling for AUTO mode
+  自动模式
  */
 void Plane::handle_auto_mode(void)
 {
@@ -558,6 +560,7 @@ void Plane::handle_auto_mode(void)
         }
     } else {
         // we are doing normal AUTO flight, the special cases
+        //正在进行正常的自动飞行，特殊情况下是用来起飞和降落
         // are for takeoff and landing
         if (nav_cmd_id != MAV_CMD_NAV_CONTINUE_AND_CHANGE_ALT) {
             steer_state.hold_course_cd = -1;
@@ -597,9 +600,33 @@ void Plane::update_flight_mode(void)
 
     switch (effective_mode) 
     {
-    case AUTO:
-        handle_auto_mode();
+    case AUTO:{
+
+        //遥控为自动模式
+        //进行控制
+        //延时
+//
+       _actuators.control[actuator_controls_s::INDEX_ROLL] = 5;
+        _actuators.control[actuator_controls_s::INDEX_PITCH] = 5;
+       _actuators.control[actuator_controls_s::INDEX_YAW] = 5;
+        _actuators.control[actuator_controls_s::INDEX_THROTTLE] = 5;
+
+
+        int ii = 0;
+
+       if(ii)
+        {
+            handle_auto_mode();
+        }else
+        {
+            _actuators.control[actuator_controls_s::INDEX_ROLL] = 0;
+             _actuators.control[actuator_controls_s::INDEX_PITCH] = 0;
+            _actuators.control[actuator_controls_s::INDEX_YAW] = 0;
+             _actuators.control[actuator_controls_s::INDEX_THROTTLE] = 0;
+        }
+
         break;
+    }
 
     case AVOID_ADSB:
     case GUIDED:

@@ -40,6 +40,9 @@ void Copter::init_ardupilot()
                         "\n\nFree RAM: %u\n",
                         (unsigned)hal.util->available_memory());
 
+
+
+
     //
     // Report firmware version code expect on console (check of actual EEPROM format version is done in load_parameters function)
     //
