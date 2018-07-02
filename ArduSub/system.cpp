@@ -1,5 +1,4 @@
 #include "Sub.h"
-#include "version.h"
 
 /*****************************************************************************
 *   The init_ardupilot function processes everything we need for an in - air restart
@@ -23,9 +22,10 @@ void Sub::init_ardupilot()
     // initialise serial port
     serial_manager.init_console();
 
-    hal.console->printf("\n\nInit " FIRMWARE_STRING
-                      "\n\nFree RAM: %u\n",
-                      (unsigned)hal.util->available_memory());
+    hal.console->printf("\n\nInit %s"
+                        "\n\nFree RAM: %u\n",
+                        AP::fwversion().fw_string,
+                        (unsigned)hal.util->available_memory());
 
     // load parameters from EEPROM
     load_parameters();
@@ -33,6 +33,20 @@ void Sub::init_ardupilot()
     BoardConfig.init();
 #if HAL_WITH_UAVCAN
     BoardConfig_CAN.init();
+#endif
+
+#if AP_FEATURE_BOARD_DETECT
+    // Detection won't work until after BoardConfig.init()
+    switch (AP_BoardConfig::get_board_type()) {
+    case AP_BoardConfig::PX4_BOARD_PIXHAWK2:
+        AP_Param::set_by_name("GND_EXT_BUS", 0);
+        break;
+    default:
+        AP_Param::set_by_name("GND_EXT_BUS", 1);
+        break;
+    }
+#else
+    AP_Param::set_default_by_name("GND_EXT_BUS", 1);
 #endif
 
     // identify ourselves correctly with the ground station
@@ -102,7 +116,6 @@ void Sub::init_ardupilot()
 #endif
 
     // init Location class
-    Location_Class::set_ahrs(&ahrs);
 #if AP_TERRAIN_AVAILABLE && AC_TERRAIN
     Location_Class::set_terrain(&terrain);
     wp_nav.set_terrain(&terrain);
@@ -110,6 +123,7 @@ void Sub::init_ardupilot()
 
 #if AVOIDANCE_ENABLED == ENABLED
     wp_nav.set_avoidance(&avoid);
+    loiter_nav.set_avoidance(&avoid);
 #endif
 
     pos_control.set_dt(MAIN_LOOP_SECONDS);
@@ -121,7 +135,7 @@ void Sub::init_ardupilot()
 
 #if MOUNT == ENABLED
     // initialise camera mount
-    camera_mount.init(&DataFlash, serial_manager);
+    camera_mount.init(serial_manager);
 #endif
 
 #ifdef USERHOOK_INIT
@@ -129,7 +143,8 @@ void Sub::init_ardupilot()
 #endif
 
     // Init baro and determine if we have external (depth) pressure sensor
-    init_barometer(false);
+    barometer.set_log_baro_bit(MASK_LOG_IMU);
+    barometer.calibrate(false);
     barometer.update();
 
     for (uint8_t i = 0; i < barometer.num_instances(); i++) {
@@ -171,8 +186,10 @@ void Sub::init_ardupilot()
     mission.init();
 
     // initialise DataFlash library
+#if LOGGING_ENABLED == ENABLED
     DataFlash.set_mission(&mission);
     DataFlash.setVehicle_Startup_Log_Writer(FUNCTOR_BIND(&sub, &Sub::Log_Write_Vehicle_Startup_Messages, void));
+#endif
 
     startup_INS_ground();
 
@@ -215,21 +232,7 @@ void Sub::startup_INS_ground()
     ahrs.reset();
 }
 
-// calibrate gyros - returns true if succesfully calibrated
-bool Sub::calibrate_gyros()
-{
-    // gyro offset calibration
-    sub.ins.init_gyro();
-
-    // reset ahrs gyro bias
-    if (sub.ins.gyro_calibrated_ok_all()) {
-        sub.ahrs.reset_gyro_drift();
-        return true;
-    }
-
-    return false;
-}
-
+// calibrate gyros - returns true if successfully calibrated
 // position_ok - returns true if the horizontal absolute position is ok and home position is set
 bool Sub::position_ok()
 {
@@ -256,10 +259,10 @@ bool Sub::ekf_position_ok()
     // if disarmed we accept a predicted horizontal position
     if (!motors.armed()) {
         return ((filt_status.flags.horiz_pos_abs || filt_status.flags.pred_horiz_pos_abs));
-    } else {
-        // once armed we require a good absolute position and EKF must not be in const_pos_mode
-        return (filt_status.flags.horiz_pos_abs && !filt_status.flags.const_pos_mode);
     }
+
+    // once armed we require a good absolute position and EKF must not be in const_pos_mode
+    return (filt_status.flags.horiz_pos_abs && !filt_status.flags.const_pos_mode);
 }
 
 // optflow_position_ok - returns true if optical flow based position estimate is ok
@@ -279,9 +282,8 @@ bool Sub::optflow_position_ok()
     // if disarmed we accept a predicted horizontal relative position
     if (!motors.armed()) {
         return (filt_status.flags.pred_horiz_pos_rel);
-    } else {
-        return (filt_status.flags.horiz_pos_rel && !filt_status.flags.const_pos_mode);
     }
+    return (filt_status.flags.horiz_pos_rel && !filt_status.flags.const_pos_mode);
 #endif
 }
 

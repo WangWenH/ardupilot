@@ -60,6 +60,9 @@
   #define MAV_SYSTEM_ID    1
 #endif
 
+#ifndef ARM_DELAY_MS
+  #define ARM_DELAY_MS  2000
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // FrSky telemetry support
@@ -93,25 +96,12 @@
   #error XXX
 #endif
 
-#if !defined(MODE_1)
-  #define MODE_1    LEARNING
-#endif
-#if !defined(MODE_2)
-  #define MODE_2    LEARNING
-#endif
-#if !defined(MODE_3)
-  #define MODE_3    LEARNING
-#endif
-#if !defined(MODE_4)
-  #define MODE_4    LEARNING
-#endif
-#if !defined(MODE_5)
-  #define MODE_5    LEARNING
-#endif
-#if !defined(MODE_6)
-  #define MODE_6    MANUAL
-#endif
 
+//////////////////////////////////////////////////////////////////////////////
+//  VISUAL ODOMETRY
+#ifndef VISUAL_ODOMETRY_ENABLED
+# define VISUAL_ODOMETRY_ENABLED ENABLED
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -148,10 +138,10 @@
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
-// AIRSPEED_CRUISE
+// CRUISE_SPEED default
 //
-#ifndef SPEED_CRUISE
-  #define SPEED_CRUISE    5  // in m/s
+#ifndef CRUISE_SPEED
+  #define CRUISE_SPEED    2  // in m/s
 #endif
 
 #ifndef TURN_GAIN
@@ -182,4 +172,16 @@
 
 #ifndef ADVANCED_FAILSAFE
   #define ADVANCED_FAILSAFE DISABLED
+#endif
+
+#ifndef STATS_ENABLED
+ # define STATS_ENABLED ENABLED
+#endif
+
+#ifndef DEVO_TELEM_ENABLED
+#if HAL_MINIMIZE_FEATURES
+ #define DEVO_TELEM_ENABLED DISABLED
+#else
+ #define DEVO_TELEM_ENABLED ENABLED
+#endif
 #endif

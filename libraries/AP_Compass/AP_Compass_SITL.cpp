@@ -6,10 +6,10 @@
 extern const AP_HAL::HAL& hal;
 
 AP_Compass_SITL::AP_Compass_SITL(Compass &compass):
+    _sitl(AP::sitl()),
     _has_sample(false),
     AP_Compass_Backend(compass)
 {
-    _sitl = (SITL::SITL *)AP_Param::find_object("SIM_");
     if (_sitl != nullptr) {
         _compass._setup_earth_field();
         for (uint8_t i=0; i<SITL_NUM_COMPASSES; i++) {
@@ -70,7 +70,7 @@ void AP_Compass_SITL::_timer()
 
     for (uint8_t i=0; i<SITL_NUM_COMPASSES; i++) {
         rotate_field(new_mag_data, _compass_instance[i]);
-        publish_raw_field(new_mag_data, AP_HAL::micros(), _compass_instance[i]);
+        publish_raw_field(new_mag_data, _compass_instance[i]);
         correct_field(new_mag_data, _compass_instance[i]);
     }
 

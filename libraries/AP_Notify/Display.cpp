@@ -315,7 +315,7 @@ static const uint8_t _font[] = {
 };
 
 // probe first 3 busses:
-static const uint8_t I2C_BUS_PROBE_MASK = 0x7;
+static const uint8_t I2C_BUS_PROBE_MASK = 0xf;
 
 bool Display::init(void)
 {
@@ -345,10 +345,8 @@ bool Display::init(void)
     }
 
     if (_driver == nullptr) {
-        _healthy = false;
         return false;
     }
-    _healthy = true;
 
     // update all on display
     update_all();
@@ -359,11 +357,6 @@ bool Display::init(void)
 
 void Display::update()
 {
-    // return immediately if not enabled
-    if (!_healthy) {
-        return;
-    }
-
     // max update frequency 2Hz
     static uint8_t timer = 0;
     if (timer++ < 25) {
@@ -495,7 +488,7 @@ void Display::update_gps(uint8_t r)
             fixname = gpsfixname[0];
             break;
     }
-    snprintf(msg, DISPLAY_MESSAGE_SIZE, "GPS:%-5s Sats:%2u", fixname, AP_Notify::flags.gps_num_sats) ;
+    snprintf(msg, DISPLAY_MESSAGE_SIZE, "GPS:%-5s Sats:%2u", fixname, (unsigned)AP_Notify::flags.gps_num_sats) ;
     draw_text(COLUMN(0), ROW(r), msg);
 }
 

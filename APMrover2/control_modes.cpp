@@ -2,32 +2,38 @@
 
 static const int16_t CH_7_PWM_TRIGGER = 1800;
 
-Mode *Rover::control_mode_from_num(const enum mode num)
+Mode *Rover::mode_from_mode_num(const enum Mode::Number num)
 {
     Mode *ret = nullptr;
     switch (num) {
-    case MANUAL:
+    case Mode::Number::MANUAL:
         ret = &mode_manual;
         break;
-    case LEARNING:
-        ret = &mode_learning;
+    case Mode::Number::ACRO:
+        ret = &mode_acro;
         break;
-    case STEERING:
+    case Mode::Number::STEERING:
         ret = &mode_steering;
         break;
-    case HOLD:
+    case Mode::Number::HOLD:
         ret = &mode_hold;
         break;
-    case AUTO:
+    case Mode::Number::LOITER:
+        ret = &mode_loiter;
+        break;
+    case Mode::Number::AUTO:
         ret = &mode_auto;
         break;
-    case RTL:
+    case Mode::Number::RTL:
         ret = &mode_rtl;
         break;
-    case GUIDED:
+    case Mode::Number::SMART_RTL:
+        ret = &mode_smartrtl;
+        break;
+    case Mode::Number::GUIDED:
        ret = &mode_guided;
         break;
-    case INITIALISING:
+    case Mode::Number::INITIALISING:
         ret = &mode_initializing;
         break;
     default:
@@ -60,7 +66,7 @@ void Rover::read_control_switch()
     // as a spring loaded trainer switch).
     if (oldSwitchPosition != switchPosition ||
         (g.reset_switch_chan != 0 &&
-         hal.rcin->read(g.reset_switch_chan-1) > RESET_SWITCH_CHAN_PWM)) {
+         RC_Channels::get_radio_in(g.reset_switch_chan-1) > RESET_SWITCH_CHAN_PWM)) {
         if (switch_debouncer == false) {
             // this ensures that mode switches only happen if the
             // switch changes for 2 reads. This prevents momentary
@@ -70,7 +76,7 @@ void Rover::read_control_switch()
             return;
         }
 
-        Mode *new_mode = control_mode_from_num((enum mode)modes[switchPosition].get());
+        Mode *new_mode = mode_from_mode_num((enum Mode::Number)modes[switchPosition].get());
         if (new_mode != nullptr) {
             set_mode(*new_mode, MODE_REASON_TX_COMMAND);
         }
@@ -82,7 +88,7 @@ void Rover::read_control_switch()
 }
 
 uint8_t Rover::readSwitch(void) {
-    const uint16_t pulsewidth = hal.rcin->read(g.mode_channel - 1);
+    const uint16_t pulsewidth = RC_Channels::get_radio_in(g.mode_channel - 1);
     if (pulsewidth <= 900 || pulsewidth >= 2200) {
         return 255;  // This is an error condition
     }
@@ -110,64 +116,152 @@ void Rover::reset_control_switch()
     read_control_switch();
 }
 
-// read at 10 hz
-// set this to your trainer switch
-void Rover::read_trim_switch()
+// ready auxiliary switch's position
+aux_switch_pos Rover::read_aux_switch_pos()
 {
+    const uint16_t radio_in = channel_aux->get_radio_in();
+    if (radio_in < AUX_SWITCH_PWM_TRIGGER_LOW) return AUX_SWITCH_LOW;
+    if (radio_in > AUX_SWITCH_PWM_TRIGGER_HIGH) return AUX_SWITCH_HIGH;
+    return AUX_SWITCH_MIDDLE;
+}
+
+// initialise position of auxiliary switch
+void Rover::init_aux_switch()
+{
+    aux_ch7 = read_aux_switch_pos();
+}
+
+void Rover::do_aux_function_change_mode(Mode &mode,
+                                        const aux_switch_pos ch_flag)
+{
+    switch(ch_flag) {
+    case AUX_SWITCH_HIGH:
+        set_mode(mode, MODE_REASON_TX_COMMAND);
+        break;
+    case AUX_SWITCH_MIDDLE:
+        // do nothing
+        break;
+    case AUX_SWITCH_LOW:
+        if (control_mode == &mode) {
+            reset_control_switch();
+        }
+    }
+}
+
+// read ch7 aux switch
+void Rover::read_aux_switch()
+{
+    // do not consume input during rc or throttle failsafe
+    if ((failsafe.bits & FAILSAFE_EVENT_THROTTLE) || (failsafe.bits & FAILSAFE_EVENT_RC)) {
+        return;
+    }
+
+    // get ch7's current position
+    aux_switch_pos aux_ch7_pos = read_aux_switch_pos();
+
+    // return if no change to switch position
+    if (aux_ch7_pos == aux_ch7) {
+        return;
+    }
+    aux_ch7 = aux_ch7_pos;
+
     switch ((enum ch7_option)g.ch7_option.get()) {
     case CH7_DO_NOTHING:
         break;
     case CH7_SAVE_WP:
-        if (channel_learn->get_radio_in() > CH_7_PWM_TRIGGER) {
-            // switch is engaged
-            ch7_flag = true;
-        } else {  // switch is disengaged
-            if (ch7_flag) {
-                ch7_flag = false;
+        if (aux_ch7 == AUX_SWITCH_HIGH) {
+            // do nothing if in AUTO mode
+            if (control_mode == &mode_auto) {
+                return;
+            }
 
-                if (control_mode == &mode_manual) {
-                    hal.console->printf("Erasing waypoints\n");
-                    // if SW7 is ON in MANUAL = Erase the Flight Plan
-                    mission.clear();
-                    if (channel_steer->get_control_in() > 3000) {
-                        // if roll is full right store the current location as home
-                        set_home_to_current_location(false);
-                    }
-                } else if (control_mode == &mode_learning || control_mode == &mode_steering) {
-                    // if SW7 is ON in LEARNING = record the Wp
+            // if disarmed clear mission and set home to current location
+            if (!arming.is_armed()) {
+                mission.clear();
+                set_home_to_current_location(false);
+                return;
+            }
 
-                    // create new mission command
-                    AP_Mission::Mission_Command cmd = {};
+            // record the waypoint if not in auto mode
+            if (control_mode != &mode_auto) {
+                // create new mission command
+                AP_Mission::Mission_Command cmd = {};
 
-                    // set new waypoint to current location
-                    cmd.content.location = current_loc;
+                // set new waypoint to current location
+                cmd.content.location = current_loc;
 
-                    // make the new command to a waypoint
-                    cmd.id = MAV_CMD_NAV_WAYPOINT;
+                // make the new command to a waypoint
+                cmd.id = MAV_CMD_NAV_WAYPOINT;
 
-                    // save command
-                    if (mission.add_cmd(cmd)) {
-                        hal.console->printf("Learning waypoint %u", static_cast<uint32_t>(mission.num_commands()));
-                    }
-                } else if (control_mode == &mode_auto) {
-                    // if SW7 is ON in AUTO = set to RTL
-                    set_mode(mode_rtl, MODE_REASON_TX_COMMAND);
-                    break;
+                // save command
+                if (mission.add_cmd(cmd)) {
+                    hal.console->printf("Added waypoint %u", unsigned(mission.num_commands()));
                 }
             }
         }
         break;
-    }
-}
 
-bool Rover::motor_active()
-{
-    // Check if armed and output throttle servo is not neutral
-    if (hal.util->get_soft_armed()) {
-        if (!is_zero(g2.motors.get_throttle())) {
-            return true;
+    // learn cruise speed and throttle
+    case CH7_LEARN_CRUISE:
+        if (aux_ch7 == AUX_SWITCH_HIGH) {
+            cruise_learn_start();
+        } else if (aux_ch7 == AUX_SWITCH_LOW) {
+            cruise_learn_complete();
         }
-    }
+        break;
 
-    return false;
+    // arm or disarm the motors
+    case CH7_ARM_DISARM:
+        if (aux_ch7 == AUX_SWITCH_HIGH) {
+            arm_motors(AP_Arming::RUDDER);
+        } else if (aux_ch7 == AUX_SWITCH_LOW) {
+            disarm_motors();
+        }
+        break;
+
+    // set mode to Manual
+    case CH7_MANUAL:
+        do_aux_function_change_mode(rover.mode_manual, aux_ch7);
+        break;
+
+    // set mode to Acro
+    case CH7_ACRO:
+        do_aux_function_change_mode(rover.mode_acro, aux_ch7);
+        break;
+
+    // set mode to Steering
+    case CH7_STEERING:
+        do_aux_function_change_mode(rover.mode_steering, aux_ch7);
+        break;
+
+    // set mode to Hold
+    case CH7_HOLD:
+        do_aux_function_change_mode(rover.mode_hold, aux_ch7);
+        break;
+
+    // set mode to Auto
+    case CH7_AUTO:
+        do_aux_function_change_mode(rover.mode_auto, aux_ch7);
+        break;
+
+    // set mode to RTL
+    case CH7_RTL:
+        do_aux_function_change_mode(rover.mode_rtl, aux_ch7);
+        break;
+
+    // set mode to SmartRTL
+    case CH7_SMART_RTL:
+        do_aux_function_change_mode(rover.mode_smartrtl, aux_ch7);
+        break;
+
+    // set mode to Guided
+    case CH7_GUIDED:
+        do_aux_function_change_mode(rover.mode_guided, aux_ch7);
+        break;
+
+    // Set mode to LOITER
+    case CH7_LOITER:
+        do_aux_function_change_mode(rover.mode_loiter, aux_ch7);
+        break;
+    }
 }

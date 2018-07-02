@@ -138,6 +138,13 @@ configuration in order to save typing.
         default=False,
         help="Disable compilation and test execution")
 
+<<<<<<< HEAD
+=======
+    g.add_option('--enable-sfml', action='store_true',
+                 default=False,
+                 help="Enable SFML graphics library")
+
+>>>>>>> f78b84805c0a4b73e59dd0d745dc7e7f76eb723e
     g.add_option('--static',
         action='store_true',
         default=False,
