@@ -44,6 +44,9 @@ public:
     void set_imu_temp(float current);
     void set_imu_target_temp(int8_t *target);
 
+    // get system ID as a string
+    bool get_system_id(char buf[40]) override;
+    
 #ifdef HAL_PWM_ALARM
     bool toneAlarm_init();
     void toneAlarm_set_tune(uint8_t tone);
@@ -68,4 +71,16 @@ private:
         uint32_t last_update_ms;
     } heater;
 #endif
+
+    /*
+      set HW RTC in UTC microseconds
+     */
+    void set_hw_rtc(uint64_t time_utc_usec) override;
+
+    /*
+      get system clock in UTC microseconds
+     */
+    uint64_t get_hw_rtc() const override;
+
+    bool flash_bootloader() override;
 };

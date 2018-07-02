@@ -27,12 +27,14 @@
 #include <AP_HAL_ChibiOS/RCInput.h>
 #include <AP_HAL_ChibiOS/CAN.h>
 
+#if CH_CFG_USE_DYNAMIC == TRUE
+
+#include <DataFlash/DataFlash.h>
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
+#include "hwdef/common/stm32_util.h"
 #include "shared_dma.h"
 #include "sdcard.h"
-
-#if CH_CFG_USE_DYNAMIC == TRUE
 
 using namespace ChibiOS;
 
@@ -231,15 +233,20 @@ void Scheduler::register_timer_failsafe(AP_HAL::Proc failsafe, uint32_t period_u
     _failsafe = failsafe;
 }
 
-extern void Reset_Handler();
 void Scheduler::reboot(bool hold_in_bootloader)
 {
     // disarm motors to ensure they are off during a bootloader upload
     hal.rcout->force_safety_on();
     hal.rcout->force_safety_no_wait();
 
+    //stop logging
+    DataFlash_Class::instance()->StopLogging();
+
     // stop sdcard driver, if active
     sdcard_stop();
+
+    // setup RTC for fast reboot
+    set_fast_reboot(hold_in_bootloader?RTC_BOOT_HOLD:RTC_BOOT_FAST);
 
     // disable all interrupt sources
     port_disable();
@@ -306,7 +313,7 @@ void Scheduler::_uavcan_thread(void *arg)
         sched->delay_microseconds(20000);
     }
     while (true) {
-        sched->delay_microseconds(100);
+        sched->delay_microseconds(300);
         for (int i = 0; i < MAX_NUMBER_OF_CAN_INTERFACES; i++) {
             if (AP_UAVCAN::get_uavcan(i) != nullptr) {
                 CANManager::from(hal.can_mgr[i])->_timer_tick();

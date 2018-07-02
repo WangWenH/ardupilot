@@ -211,6 +211,21 @@ void Rover::send_pid_tuning(mavlink_channel_t chan)
             return;
         }
     }
+
+    // pitch to throttle pid
+    if (g.gcs_pid_mask & 4) {
+        pid_info = &g2.attitude_control.get_pitch_to_throttle_pid().get_pid_info();
+        mavlink_msg_pid_tuning_send(chan, PID_TUNING_PITCH,
+                                    pid_info->desired,
+                                    ahrs.pitch,
+                                    0,
+                                    pid_info->P,
+                                    pid_info->I,
+                                    pid_info->D);
+        if (!HAVE_PAYLOAD_SPACE(chan, PID_TUNING)) {
+            return;
+        }
+    }
 }
 
 void Rover::send_fence_status(mavlink_channel_t chan)
@@ -448,7 +463,8 @@ static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_MAG_CAL_PROGRESS,
     MSG_EKF_STATUS_REPORT,
     MSG_VIBRATION,
-    MSG_RPM
+    MSG_RPM,
+    MSG_ESC_TELEMETRY,
 };
 
 const struct GCS_MAVLINK::stream_entries GCS_MAVLINK::all_stream_entries[] = {
@@ -1222,7 +1238,6 @@ void Rover::mavlink_delay_cb()
         last_5s = tnow;
         gcs().send_text(MAV_SEVERITY_INFO, "Initialising APM");
     }
-    check_usb_mux();
 
     DataFlash.EnableWrites(true);
 }
@@ -1309,9 +1324,4 @@ bool GCS_MAVLINK_Rover::set_mode(const uint8_t mode)
         return false;
     }
     return rover.set_mode(*new_mode, MODE_REASON_GCS_COMMAND);
-}
-
-const AP_FWVersion &GCS_MAVLINK_Rover::get_fwver() const
-{
-    return rover.fwver;
 }

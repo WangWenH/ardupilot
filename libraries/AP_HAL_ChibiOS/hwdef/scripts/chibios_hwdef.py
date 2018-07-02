@@ -10,6 +10,8 @@ parser = argparse.ArgumentParser("chibios_pins.py")
 parser.add_argument(
     '-D', '--outdir', type=str, default=None, help='Output directory')
 parser.add_argument(
+    '--bootloader', action='store_true', default=False, help='configure for bootloader')
+parser.add_argument(
     'hwdef', type=str, default=None, help='hardware definition file')
 
 args = parser.parse_args()
@@ -413,7 +415,7 @@ def write_mcu_config(f):
     flash_reserve_start = get_config(
         'FLASH_RESERVE_START_KB', default=16, type=int)
     f.write('\n// location of loaded firmware\n')
-    f.write('#define FLASH_LOAD_ADDRESS 0x%08x\n' % flash_reserve_start*1024)
+    f.write('#define FLASH_LOAD_ADDRESS 0x%08x\n' % (0x08000000 + flash_reserve_start*1024))
     f.write('\n')
 
     ram_size_kb = get_mcu_config('RAM_SIZE_KB', True)
@@ -425,19 +427,54 @@ def write_mcu_config(f):
     f.write('\n// CPU serial number (12 bytes)\n')
     f.write('#define UDID_START 0x%08x\n\n' % get_mcu_config('UDID_START', True))
 
+    f.write('\n// APJ board ID (for bootloaders)\n')
+    f.write('#define APJ_BOARD_ID %s\n' % get_config('APJ_BOARD_ID'))
+
     lib = get_mcu_lib(mcu_type)
     build_info = lib.build
     # setup build variables
     for v in build_info.keys():
         build_flags.append('%s=%s' % (v, build_info[v]))
 
+    # setup for bootloader build
+    if args.bootloader:
+        f.write('''
+#define HAL_BOOTLOADER_BUILD TRUE        
+#define HAL_USE_ADC FALSE
+#define HAL_USE_EXT FALSE
+#define HAL_NO_UARTDRIVER
+#define HAL_NO_PRINTF
+#define HAL_NO_CCM
+#define CH_DBG_STATISTICS FALSE
+#define CH_CFG_USE_TM FALSE
+#define CH_CFG_USE_REGISTRY FALSE
+#define CH_CFG_USE_WAITEXIT FALSE
+#define CH_CFG_USE_DYNAMIC FALSE
+#define CH_CFG_USE_MEMPOOLS FALSE
+#define CH_DBG_FILL_THREADS FALSE
+#define CH_CFG_USE_SEMAPHORES FALSE
+#define CH_CFG_USE_HEAP FALSE        
+#define CH_CFG_USE_MUTEXES FALSE
+#define CH_CFG_USE_CONDVARS FALSE
+#define CH_CFG_USE_CONDVARS_TIMEOUT FALSE
+#define CH_CFG_USE_EVENTS_TIMEOUT FALSE
+#define CH_CFG_USE_MESSAGES FALSE
+#define CH_CFG_USE_MAILBOXES FALSE
+#define HAL_USE_I2C FALSE
+#define HAL_USE_PWM FALSE
+''')
+
 def write_ldscript(fname):
     '''write ldscript.ld for this board'''
-    flash_size = get_config('FLASH_SIZE_KB', type=int)
+    flash_size = get_config('FLASH_USE_MAX_KB', type=int, default=0)
+    if flash_size == 0:
+        flash_size = get_config('FLASH_SIZE_KB', type=int)
 
     # space to reserve for bootloader and storage at start of flash
     flash_reserve_start = get_config(
         'FLASH_RESERVE_START_KB', default=16, type=int)
+
+    env_vars['FLASH_RESERVE_START_KB'] = str(flash_reserve_start)
 
     # space to reserve for storage at end of flash
     flash_reserve_end = get_config('FLASH_RESERVE_END_KB', default=0, type=int)
@@ -476,7 +513,10 @@ def write_USB_config(f):
     f.write('#define HAL_USB_VENDOR_ID %s\n' % get_config('USB_VENDOR', default=0x0483)) # default to ST
     f.write('#define HAL_USB_PRODUCT_ID %s\n' % get_config('USB_PRODUCT', default=0x5740))
     f.write('#define HAL_USB_STRING_MANUFACTURER "%s"\n' % get_config("USB_STRING_MANUFACTURER", default="ArduPilot"))
-    f.write('#define HAL_USB_STRING_PRODUCT "%s"\n' % get_config("USB_STRING_PRODUCT", default="%BOARD%"))
+    default_product = "%BOARD%"
+    if args.bootloader:
+        default_product += "-BL"
+    f.write('#define HAL_USB_STRING_PRODUCT "%s"\n' % get_config("USB_STRING_PRODUCT", default=default_product))
     f.write('#define HAL_USB_STRING_SERIAL "%s"\n' % get_config("USB_STRING_SERIAL", default="%SERIAL%"))
 
     f.write('\n\n')
@@ -550,8 +590,8 @@ def write_UART_config(f):
     # write out driver declarations for HAL_ChibOS_Class.cpp
     devnames = "ABCDEFGH"
     sdev = 0
+    idx = 0
     for dev in uart_list:
-        idx = uart_list.index(dev)
         if dev == 'EMPTY':
             f.write('#define HAL_UART%s_DRIVER Empty::UARTDriver uart%sDriver\n' %
                 (devnames[idx], devnames[idx]))
@@ -560,7 +600,8 @@ def write_UART_config(f):
                 '#define HAL_UART%s_DRIVER ChibiOS::UARTDriver uart%sDriver(%u)\n'
                 % (devnames[idx], devnames[idx], sdev))
             sdev += 1
-    for idx in range(len(uart_list), 6):
+        idx += 1
+    for idx in range(len(uart_list), 7):
         f.write('#define HAL_UART%s_DRIVER Empty::UARTDriver uart%sDriver\n' %
                 (devnames[idx], devnames[idx]))
 
@@ -607,9 +648,26 @@ def write_UART_config(f):
             f.write("STM32_%s_RX_DMA_CONFIG, STM32_%s_TX_DMA_CONFIG, %s}\n" %
                     (dev, dev, rts_line))
     f.write('#define HAL_UART_DEVICE_LIST %s\n\n' % ','.join(devlist))
-    if not need_uart_driver:
+    if not need_uart_driver and not args.bootloader:
         f.write('#define HAL_USE_SERIAL FALSE\n')
 
+def write_UART_config_bootloader(f):
+    '''write UART config defines'''
+    get_config('UART_ORDER')
+    uart_list = config['UART_ORDER']
+    f.write('\n// UART configuration\n')
+    devlist = []
+    have_uart = False
+    for u in uart_list:
+        if u.startswith('OTG'):
+            devlist.append('(BaseChannel *)&SDU1')
+        else:
+            unum = int(u[-1])
+            devlist.append('(BaseChannel *)&SD%u' % unum)
+            have_uart = True
+    f.write('#define BOOTLOADER_DEV_LIST %s\n' % ','.join(devlist))
+    if not have_uart:
+        f.write('#define HAL_USE_SERIAL FALSE\n')
 
 def write_I2C_config(f):
     '''write I2C config defines'''
@@ -627,17 +685,22 @@ def write_I2C_config(f):
     for dev in i2c_list:
         if not dev.startswith('I2C') or dev[3] not in "1234":
             error("Bad I2C_ORDER element %s" % dev)
+        n = int(dev[3:])
+        devlist.append('HAL_I2C%u_CONFIG' % n)
+        f.write('''
+#if defined(STM32_I2C_I2C%u_RX_DMA_STREAM) && defined(STM32_I2C_I2C%u_TX_DMA_STREAM)
+#define HAL_I2C%u_CONFIG { &I2CD%u, STM32_I2C_I2C%u_RX_DMA_STREAM, STM32_I2C_I2C%u_TX_DMA_STREAM }
+#else
+#define HAL_I2C%u_CONFIG { &I2CD%u, SHARED_DMA_NONE, SHARED_DMA_NONE }
+#endif
+'''
+            % (n, n, n, n, n, n, n, n))
         if dev + "_SCL" in bylabel:
             p = bylabel[dev + "_SCL"]
             f.write(
                 '#define HAL_%s_SCL_AF %d\n' % (dev, p.af)
             )
-        n = int(dev[3:])
-        devlist.append('HAL_I2C%u_CONFIG' % n)
-        f.write(
-            '#define HAL_I2C%u_CONFIG { &I2CD%u, STM32_I2C_I2C%u_RX_DMA_STREAM, STM32_I2C_I2C%u_TX_DMA_STREAM }\n'
-            % (n, n, n, n))
-    f.write('#define HAL_I2C_DEVICE_LIST %s\n\n' % ','.join(devlist))
+    f.write('\n#define HAL_I2C_DEVICE_LIST %s\n\n' % ','.join(devlist))
 
 def parse_timer(str):
     '''parse timer channel string, i.e TIM8_CH2N'''
@@ -879,10 +942,30 @@ def write_GPIO_config(f):
                 (label, p.port, p.pin))
     f.write('\n')
 
+def bootloader_path():
+    # always embed a bootloader if it is available
+    this_dir = os.path.realpath(__file__)
+    rootdir = os.path.relpath(os.path.join(this_dir, "../../../../.."))
+    hwdef_dirname = os.path.basename(os.path.dirname(args.hwdef))
+    bootloader_filename = "%s_bl.bin" % (hwdef_dirname,)
+    bootloader_path = os.path.join(rootdir,
+                                   "Tools",
+                                   "bootloaders",
+                                   bootloader_filename)
+    if os.path.exists(bootloader_path):
+        return os.path.realpath(bootloader_path)
+
+    return None
+
+def add_bootloader():
+    '''added bootloader to ROMFS'''
+    bp = bootloader_path()
+    if bp is not None:
+        romfs.append( ("bootloader.bin", bp) )
+
 def write_ROMFS(outdir):
     '''create ROMFS embedded header'''
-    from embed import create_embedded_h
-    create_embedded_h(os.path.join(outdir, 'ap_romfs_embedded.h'), romfs)
+    env_vars['ROMFS_FILES'] = romfs
 
 def write_prototype_file():
     '''write the prototype file for apj generation'''
@@ -942,7 +1025,6 @@ def write_hwdef_header(outfilename):
 
     write_mcu_config(f)
     write_USB_config(f)
-    write_I2C_config(f)
     write_SPI_config(f)
     write_ADC_config(f)
     write_GPIO_config(f)
@@ -955,9 +1037,14 @@ def write_hwdef_header(outfilename):
                                   dma_priority=get_config('DMA_PRIORITY',default='TIM* SPI*', spaces=True),
                                   dma_noshare=get_config('DMA_NOSHARE',default='', spaces=True))
 
-    write_PWM_config(f)
-    
-    write_UART_config(f)
+    if not args.bootloader:
+        write_PWM_config(f)
+        write_I2C_config(f)
+        write_UART_config(f)
+    else:
+        write_UART_config_bootloader(f)
+
+    add_bootloader()
 
     if len(romfs) > 0:
         f.write('#define HAL_HAVE_AP_ROMFS_EMBEDDED_H 1\n')
@@ -1033,8 +1120,15 @@ def build_peripheral_list():
             continue
         for prefix in prefixes:
             if type.startswith(prefix):
-                peripherals.append(type + "_TX")
-                peripherals.append(type + "_RX")
+                ptx = type + "_TX"
+                prx = type + "_RX"
+                peripherals.append(ptx)
+                peripherals.append(prx)
+                if not ptx in bylabel:
+                    bylabel[ptx] = p
+                if not prx in bylabel:
+                    bylabel[prx] = p
+                
         if type.startswith('ADC'):
             peripherals.append(type)
         if type.startswith('SDIO') or type.startswith('SDMMC'):
