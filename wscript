@@ -23,6 +23,7 @@ from waflib import Build, ConfigSet, Configure, Context, Utils
 # this makes recompilation at least when defines change. which might
 # be sufficient.
 
+# test
 # Default installation prefix for Linux boards
 default_prefix = '/usr/'
 
